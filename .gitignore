@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Env
+.env
+.env.local
+.env*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Drizzle migrations (optional — commit if you want migration history)
+# db/migrations/
+
+# TypeScript
+*.tsbuildinfo
