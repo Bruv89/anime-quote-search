@@ -1,8 +1,13 @@
 /**
  * src/lib/youtube.ts
  *
- * YouTube Data API v3 helpers with anime-only filtering.
- * Supports multi-query parallel search for maximum video coverage.
+ * YouTube Data API v3 — anime-only search.
+ *
+ * Strategy:
+ *   - Always append "アニメ" to the search query
+ *   - Use videoCategoryId=1 (Film & Animation) + regionCode=JP
+ *   - Post-filter: require at least one strong anime signal in title/channel
+ *     (Japanese chars alone are NOT enough — too many false positives)
  */
 
 export interface YouTubeVideoMeta {
@@ -18,36 +23,37 @@ interface YTItem {
   snippet: {
     title: string;
     channelTitle: string;
-    thumbnails: {
-      medium?: { url: string };
-      default?: { url: string };
-    };
+    thumbnails: { medium?: { url: string }; default?: { url: string } };
   };
 }
-
 interface YTResponse {
   items?: YTItem[];
   error?: { message: string; code: number };
 }
 
-function decodeHTML(text: string): string {
-  return text
-    .replace(/&amp;/g, "&").replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+function decodeHTML(t: string): string {
+  return t
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 }
 
-// Keywords that strongly indicate non-anime content
-const EXCLUDE_KEYWORDS = [
+// Words that strongly indicate non-anime content
+const HARD_EXCLUDE = [
   "cooking", "recipe", "football", "soccer", "news", "politics",
-  "makeup", "fashion", "minecraft", "fortnite", "roblox", "tutorial",
-  "how to", "unboxing", "vlog", "podcast",
+  "makeup", "fashion", "minecraft", "fortnite", "roblox",
+  "マラソン", "観光", "旅行", "vlog", "グルメ", "食べ歩き",
+  "道頓堀", "大阪観光", "市民マラソン", "応援",
 ];
 
-// Keywords that confirm anime content
-const ANIME_KEYWORDS = [
-  "anime", "アニメ", "episode", "エピソード", "op ", " ed ", "opening",
-  "ending", " sub", "dub", "reaction", "review", "manga", "マンガ",
-  "漫画", "ova", "アニメ映画", "amv", "クリップ", "clip",
+// At least ONE of these must be present for a video to be considered anime
+const ANIME_REQUIRED = [
+  "anime", "アニメ", "漫画", "manga", "episode", "エピソード",
+  "op ", " ed ", "opening", "ending", "amv", "mad",
+  "声優", "キャラ", "名言", "セリフ", "作品", "劇場",
+  "ova", "アニソン", "主題歌", "アニメーション",
+  "フィギュア", "cosplay", "コスプレ",
+  // Common anime title keywords
+  "ちゃん", "くん", "さん",  // character name suffixes — not perfect but helpful
 ];
 
 function looksLikeAnime(item: YTItem): boolean {
@@ -55,31 +61,20 @@ function looksLikeAnime(item: YTItem): boolean {
   const channel = item.snippet.channelTitle.toLowerCase();
   const combined = title + " " + channel;
 
-  if (EXCLUDE_KEYWORDS.some((kw) => combined.includes(kw))) return false;
+  // Hard exclude first
+  if (HARD_EXCLUDE.some((kw) => combined.includes(kw.toLowerCase()))) return false;
 
-  const hasAnimeKw  = ANIME_KEYWORDS.some((kw) => combined.includes(kw.toLowerCase()));
-  const hasJapanese = /[\u3040-\u9FFF]/.test(item.snippet.title);
-
-  return hasAnimeKw || hasJapanese;
+  // Must have at least one anime signal
+  return ANIME_REQUIRED.some((kw) => combined.includes(kw.toLowerCase()));
 }
 
-/**
- * Single YouTube search call.
- * All params tuned for anime content:
- *   - videoCategoryId=1 (Film & Animation)
- *   - relevanceLanguage=ja + regionCode=JP
- *   - appends "アニメ" to query
- */
 async function singleSearch(
   query: string,
   apiKey: string,
   maxResults: number
 ): Promise<YouTubeVideoMeta[]> {
-  // If query is already Japanese, don't append アニメ — it narrows results too much
-  // and causes YouTube to return generic anime pages instead of content matching
-  // the specific phrase. For romaji queries we still append it.
-  const hasJapanese = /[\u3040-\u9FFF]/.test(query);
-  const searchQuery = hasJapanese ? query : `${query} アニメ`;
+  // Always append アニメ — this is the key to getting anime content
+  const searchQuery = `${query} アニメ`;
 
   const url = new URL("https://www.googleapis.com/youtube/v3/search");
   url.searchParams.set("part", "snippet");
@@ -113,17 +108,13 @@ async function singleSearch(
 }
 
 /**
- * Run multiple YouTube searches in parallel using different query formulations,
- * then deduplicate by videoId.
- *
- * This is the key to covering more videos without increasing latency:
- * 3 searches × 15 results = up to 45 candidates, fetched concurrently.
- * Quota cost: 3 × 100 = 300 units per user search.
+ * Run multiple searches in parallel and deduplicate results.
+ * With 3 queries × 20 results = up to 60 candidates before filtering.
  */
 export async function searchAnimeVideosMulti(
   queries: string[],
   apiKey: string,
-  maxPerQuery = 15
+  maxPerQuery = 20
 ): Promise<YouTubeVideoMeta[]> {
   const settled = await Promise.allSettled(
     queries.map((q) => singleSearch(q, apiKey, maxPerQuery))
@@ -132,12 +123,12 @@ export async function searchAnimeVideosMulti(
   const seen    = new Set<string>();
   const results: YouTubeVideoMeta[] = [];
 
-  for (const result of settled) {
-    if (result.status !== "fulfilled") continue;
-    for (const video of result.value) {
-      if (!seen.has(video.videoId)) {
-        seen.add(video.videoId);
-        results.push(video);
+  for (const r of settled) {
+    if (r.status !== "fulfilled") continue;
+    for (const v of r.value) {
+      if (!seen.has(v.videoId)) {
+        seen.add(v.videoId);
+        results.push(v);
       }
     }
   }

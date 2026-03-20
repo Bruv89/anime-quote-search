@@ -221,20 +221,22 @@ export function buildSearchVariants(query: string): string[] {
  * Running these in parallel gives 3x more candidate videos.
  */
 export function buildYouTubeQueries(query: string): string[] {
-  // IMPORTANT: Use Japanese variants first.
-  // YouTube understands Japanese much better than romaji.
-  // "くいだおれ アニメ" finds far more relevant videos than "kuidaore アニメ".
+  // NOTE: youtube.ts always appends "アニメ" to every query.
+  // Here we build the BASE terms (the actual words to search for).
+  // We want: Japanese variants first so YouTube understands the content,
+  // then romaji as fallback.
+
   const queries: string[] = [];
 
   if (isRomaji(query)) {
-    // Romaji → hiragana and katakana as primary queries
+    // Convert to hiragana and katakana — YouTube understands these
     const hira = wanakana.toHiragana(query);
     const kata = wanakana.toKatakana(query);
-    if (hira !== query) queries.push(hira);  // e.g. "くいだおれ"
-    if (kata !== query && kata !== hira) queries.push(kata);  // e.g. "クイダオレ"
-    queries.push(query);                      // romaji as last fallback
+    if (hira !== query) queries.push(hira);
+    if (kata !== query && kata !== hira) queries.push(kata);
+    queries.push(query); // romaji as last fallback
   } else if (containsJapanese(query)) {
-    queries.push(query);                      // original Japanese first
+    queries.push(query);
     const romaji = wanakana.toRomaji(query, { convertLongVowelMark: true });
     if (romaji !== query) queries.push(romaji);
   } else {
