@@ -3,11 +3,11 @@
  *
  * YouTube Data API v3 — anime-only search.
  *
- * Strategy:
- *   - Always append "アニメ" to the search query
- *   - Use videoCategoryId=1 (Film & Animation) + regionCode=JP
- *   - Post-filter: require at least one strong anime signal in title/channel
- *     (Japanese chars alone are NOT enough — too many false positives)
+ * Since we always append "アニメ" to every query, YouTube's own algorithm
+ * already biases results toward anime content. Our post-filter only needs
+ * to remove obvious false positives (sports events, cooking vlogs, etc.)
+ * — we should NOT require explicit anime keywords in the title, because
+ * many valid anime clips have plain titles like "くいだおれ太郎が劇場支配人".
  */
 
 export interface YouTubeVideoMeta {
@@ -37,35 +37,19 @@ function decodeHTML(t: string): string {
     .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 }
 
-// Words that strongly indicate non-anime content
+// Only hard-exclude content that is CLEARLY not anime
+// (sports events, cooking, travel vlogs, etc.)
 const HARD_EXCLUDE = [
-  "cooking", "recipe", "football", "soccer", "news", "politics",
-  "makeup", "fashion", "minecraft", "fortnite", "roblox",
-  "マラソン", "観光", "旅行", "vlog", "グルメ", "食べ歩き",
-  "道頓堀", "大阪観光", "市民マラソン", "応援",
-];
-
-// At least ONE of these must be present for a video to be considered anime
-const ANIME_REQUIRED = [
-  "anime", "アニメ", "漫画", "manga", "episode", "エピソード",
-  "op ", " ed ", "opening", "ending", "amv", "mad",
-  "声優", "キャラ", "名言", "セリフ", "作品", "劇場",
-  "ova", "アニソン", "主題歌", "アニメーション",
-  "フィギュア", "cosplay", "コスプレ",
-  // Common anime title keywords
-  "ちゃん", "くん", "さん",  // character name suffixes — not perfect but helpful
+  "cooking", "recipe", "football", "soccer",
+  "makeup", "minecraft", "fortnite", "roblox",
+  "マラソン", "市民マラソン", "応援", "グルメ食べ歩き",
+  "大阪観光", "旅行vlog",
 ];
 
 function looksLikeAnime(item: YTItem): boolean {
-  const title   = item.snippet.title.toLowerCase();
-  const channel = item.snippet.channelTitle.toLowerCase();
-  const combined = title + " " + channel;
-
-  // Hard exclude first
-  if (HARD_EXCLUDE.some((kw) => combined.includes(kw.toLowerCase()))) return false;
-
-  // Must have at least one anime signal
-  return ANIME_REQUIRED.some((kw) => combined.includes(kw.toLowerCase()));
+  const combined = (item.snippet.title + " " + item.snippet.channelTitle).toLowerCase();
+  // Only remove obvious non-anime — trust YouTube's アニメ query for the rest
+  return !HARD_EXCLUDE.some((kw) => combined.includes(kw.toLowerCase()));
 }
 
 async function singleSearch(
@@ -73,7 +57,7 @@ async function singleSearch(
   apiKey: string,
   maxResults: number
 ): Promise<YouTubeVideoMeta[]> {
-  // Always append アニメ — this is the key to getting anime content
+  // Always append アニメ — YouTube understands this and biases toward anime
   const searchQuery = `${query} アニメ`;
 
   const url = new URL("https://www.googleapis.com/youtube/v3/search");
@@ -107,10 +91,6 @@ async function singleSearch(
     }));
 }
 
-/**
- * Run multiple searches in parallel and deduplicate results.
- * With 3 queries × 20 results = up to 60 candidates before filtering.
- */
 export async function searchAnimeVideosMulti(
   queries: string[],
   apiKey: string,

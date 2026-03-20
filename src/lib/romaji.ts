@@ -221,27 +221,42 @@ export function buildSearchVariants(query: string): string[] {
  * Running these in parallel gives 3x more candidate videos.
  */
 export function buildYouTubeQueries(query: string): string[] {
-  // NOTE: youtube.ts always appends "アニメ" to every query.
-  // Here we build the BASE terms (the actual words to search for).
-  // We want: Japanese variants first so YouTube understands the content,
-  // then romaji as fallback.
+  // Build the maximum useful set of YouTube query strings.
+  // youtube.ts appends "アニメ" to each one automatically.
+  //
+  // Why we need multiple scripts:
+  //   "くいだおれ アニメ"  → YouTube finds hiragana matches
+  //   "クイダオレ アニメ"  → YouTube finds katakana matches  
+  //   "食い倒れ アニメ"   → YouTube finds kanji matches (not derivable from kana alone)
+  //   "kuidaore アニメ"   → romaji fallback for English-titled channels
+  //
+  // We can't convert hiragana→kanji (that's a different problem), so we
+  // send all the kana/romaji variants we have and let YouTube handle the rest.
 
-  const queries: string[] = [];
+  const set = new Set<string>();
 
   if (isRomaji(query)) {
-    // Convert to hiragana and katakana — YouTube understands these
+    // Romaji input: add hiragana and katakana — these are the most useful for YouTube
     const hira = wanakana.toHiragana(query);
     const kata = wanakana.toKatakana(query);
-    if (hira !== query) queries.push(hira);
-    if (kata !== query && kata !== hira) queries.push(kata);
-    queries.push(query); // romaji as last fallback
+    if (hira !== query) set.add(hira);
+    if (kata !== query) set.add(kata);
+    set.add(query); // romaji last
   } else if (containsJapanese(query)) {
-    queries.push(query);
+    set.add(query); // original (kanji/mixed) first — most specific
+    // Add hiragana version (wanakana converts kana, leaves kanji)
+    // Actually wanakana.toHiragana converts katakana→hiragana
+    if (wanakana.isKatakana(query)) {
+      set.add(wanakana.toHiragana(query));
+    } else if (wanakana.isHiragana(query)) {
+      set.add(wanakana.toKatakana(query));
+    }
+    // Add romaji
     const romaji = wanakana.toRomaji(query, { convertLongVowelMark: true });
-    if (romaji !== query) queries.push(romaji);
+    if (romaji !== query) set.add(romaji);
   } else {
-    queries.push(query);
+    set.add(query);
   }
 
-  return queries.slice(0, 3);
+  return Array.from(set).slice(0, 3);
 }
