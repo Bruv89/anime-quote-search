@@ -5,12 +5,7 @@ node_modules/
 .next/
 out/
 
-# Database files
-*.db
-*.db-shm
-*.db-wal
-
-# Env
+# Environment - NEVER commit real keys
 .env
 .env.local
 .env*.local
@@ -18,9 +13,6 @@ out/
 # OS
 .DS_Store
 Thumbs.db
-
-# Drizzle migrations (optional — commit if you want migration history)
-# db/migrations/
 
 # TypeScript
 *.tsbuildinfo

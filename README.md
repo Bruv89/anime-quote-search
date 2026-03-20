@@ -1,153 +1,103 @@
-# 🎌 Anime Quote Search Engine — MVP
+# 🎌 Kotoba Search — Anime Transcript Search Engine
 
-> Search exact quotes from anime in **Japanese** (Kanji/Kana) or **Romaji**.
+> Cerca una frase in Giapponese o Romaji e trova il momento esatto nei video anime su YouTube.
 
-Built with **Next.js 15 (App Router) · TypeScript · Tailwind CSS · SQLite FTS5 · Drizzle ORM · wanakana**
+**Stack:** Next.js 15 · TypeScript · Tailwind CSS · YouTube Data API v3 · youtube-transcript · wanakana
 
 ---
 
-## Quick Start
+## Come funziona
 
-### 1. Install dependencies
+```
+Utente digita "arigato" o "ありがとう"
+        │
+        ▼
+Costruisce varianti di ricerca:
+  "arigato" → ["arigato", "ありがと", "アリガト", ...]
+        │
+        ▼
+YouTube Data API → top 15 video anime (filtro: アニメ + Film&Animation)
+        │
+        ▼
+Scarica trascrizioni in parallelo (timeout 7s per video)
+        │
+        ▼
+Sliding window su 3 segmenti → trova la frase
+        │
+        ▼
+Restituisce video con match + deep-link al secondo esatto
+```
+
+---
+
+## Setup
+
+### 1. Installa dipendenze
 ```bash
 npm install
 ```
 
-### 2. Seed the database
-This reads every `.srt` / `.ass` file inside `./data/subtitles/<AnimeFolder>/`,
-parses the subtitles, pre-computes Romaji, and populates `anime-quotes.db`.
-
+### 2. Configura le variabili d'ambiente
 ```bash
-npm run seed
+cp .env.example .env.local
 ```
-
-You should see output like:
+Modifica `.env.local`:
 ```
-📂  Found 3 anime folder(s)
-
-  ➕  Created anime: "Fullmetal Alchemist Brotherhood" (id=1)
-     📄  Parsing episode 1: ep01.srt
-          └─ 10 subtitle lines extracted
-          └─ ✅  10 quotes inserted
-  ...
-
-✅  Seeding complete — 32 quotes in DB, 32 in FTS index
+YOUTUBE_API_KEY=la_tua_chiave_qui
 ```
+Ottieni una chiave gratuita su [console.cloud.google.com](https://console.cloud.google.com) → abilita "YouTube Data API v3".
 
-### 3. Start the dev server
+> **Quota gratuita:** 10.000 unità/giorno. Ogni ricerca = 100 unità → 100 ricerche/giorno.
+
+### 3. Avvia
 ```bash
 npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000).
-
----
-
-## Adding Your Own Subtitles
-
-1. Create a folder inside `./data/subtitles/` — the folder name becomes the **anime title** (underscores → spaces).
-2. Drop `.srt` or `.ass` files in it. The filename is used to infer the episode number (e.g. `ep01.srt`, `S01E03.ass`).
-3. Re-run `npm run seed` — existing records are skipped automatically (idempotent).
-
-```
-data/
-└── subtitles/
-    ├── Attack_on_Titan/
-    │   ├── ep01.srt
-    │   └── ep02.srt
-    └── My_Hero_Academia/
-        └── ep01.ass
+# → http://localhost:3000
 ```
 
 ---
 
-## Architecture
+## Struttura del progetto
 
 ```
-anime-quote-search/
-├── data/subtitles/         # Drop subtitle files here
-├── db/
-│   └── schema.ts           # Drizzle ORM schema (animes, episodes, quotes)
-├── scripts/
-│   └── seed.ts             # Ingestion script
-├── src/
-│   ├── app/
-│   │   ├── api/search/
-│   │   │   └── route.ts    # GET /api/search?q=...
-│   │   ├── globals.css
-│   │   ├── layout.tsx
-│   │   └── page.tsx        # Homepage + search UI
-│   ├── components/
-│   │   ├── QuoteCard.tsx   # Single result card
-│   │   └── SearchBar.tsx   # Search input
-│   └── lib/
-│       └── db.ts           # DB singleton + FTS5 bootstrap
-├── drizzle.config.ts
-├── tailwind.config.ts
-└── package.json
-```
-
-### Romaji Strategy
-
-The seed script pre-computes Romaji for every quote using `wanakana.toRomaji()`
-and stores it in the `body_romaji` column. The FTS5 virtual table (`quotes_fts`)
-indexes **both** `body_ja` and `body_romaji`, so:
-
-| User types | FTS searches |
-|------------|-------------|
-| `arigato`  | `body_romaji: "arigato"` OR `body_ja: "ありがと"` |
-| `ありがとう` | `body_ja: "ありがとう"` |
-| `等価交換`  | `body_ja: "等価交換"` |
-
-This avoids any runtime transliteration overhead on the hot search path.
-
----
-
-## API
-
-```
-GET /api/search?q=<query>&limit=20&offset=0
-```
-
-**Response:**
-```json
-{
-  "query": "arigato",
-  "normalizedQuery": "arigato",
-  "total": 1,
-  "results": [
-    {
-      "quoteId": 10,
-      "bodyJa": "ありがとう、アルフォンス。",
-      "bodyRomaji": "arigatou, arufonsu.",
-      "startTimestamp": "01:30",
-      "startTime": 90.0,
-      "endTime": 93.8,
-      "episodeId": 1,
-      "episodeNumber": 1,
-      "episodeTitle": null,
-      "animeId": 1,
-      "animeTitle": "Fullmetal Alchemist Brotherhood",
-      "animeSlug": "fullmetal_alchemist_brotherhood"
-    }
-  ]
-}
+src/
+├── app/
+│   ├── api/
+│   │   └── transcript/route.ts   # Core engine: YouTube search + transcript scan
+│   ├── globals.css
+│   ├── layout.tsx
+│   └── page.tsx                  # UI principale
+├── components/
+│   ├── SearchBar.tsx
+│   └── TranscriptCard.tsx        # Card risultato con deep-link al timestamp
+└── lib/
+    ├── romaji.ts                  # Conversione Romaji ↔ Kana, varianti di ricerca
+    └── youtube.ts                 # YouTube search con filtro anime-only
 ```
 
 ---
 
-## Scripts
+## Supporto Romaji
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start Next.js dev server |
-| `npm run build` | Production build |
-| `npm run seed` | Ingest subtitles → populate DB |
-| `npm run db:studio` | Open Drizzle Studio (DB GUI) |
+| Input utente | Varianti cercate |
+|---|---|
+| `arigato` | `arigato`, `ありがと`, `アリガト` |
+| `arigatou` | `arigatou`, `ありがとう`, `アリガトウ`, `arigato`, `ありがと` |
+| `ありがとう` | `ありがとう`, `arigatou`, `アリガトウ` |
+| `nakama` | `nakama`, `なかま`, `ナカマ` |
 
 ---
 
-## Legal
+## Sicurezza
 
-This tool is **text-only**. No video playback, no image scraping, no subtitle redistribution.
-You must supply your own legally-obtained subtitle files.
+- La chiave API è **solo** in `.env.local`, mai in Git
+- `.env.local` è nel `.gitignore`
+- `.env.example` contiene solo placeholder
+
+## Comandi
+
+| Comando | Descrizione |
+|---|---|
+| `npm run dev` | Server di sviluppo |
+| `npm run build` | Build di produzione |
+| `npm start` | Avvia la build |
