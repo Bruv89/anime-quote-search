@@ -209,7 +209,12 @@ export function buildSearchVariants(query: string): string[] {
     }
   }
 
-  return Array.from(variants).filter(Boolean);
+  // Filter out garbage variants: strings that mix kanji with latin chars
+  // e.g. wanakana.toRomaji("逃げちゃダメだ") = "逃gechadameda" — useless for matching
+  const isGarbage = (s: string) =>
+    /[\u4E00-\u9FFF\u3400-\u4DBF]/.test(s) && /[a-zA-Z]/.test(s);
+
+  return Array.from(variants).filter((s) => Boolean(s) && !isGarbage(s));
 }
 
 /**
@@ -256,9 +261,11 @@ export function buildYouTubeQueries(query: string): string[] {
       const r = wanakana.toRomaji(query, { convertLongVowelMark: true });
       if (r !== query) set.add(r);
     } else {
-      // Mixed kanji/kana — add romaji
+      // Mixed kanji/kana — only add romaji if it's pure latin (no leftover kanji)
+      // wanakana can't convert kanji, so "逃げちゃダメだ" → "逃gechadameda" (garbage)
       const r = wanakana.toRomaji(query, { convertLongVowelMark: true });
-      if (r !== query) set.add(r);
+      const isCleanRomaji = /^[a-zA-Z0-9\s\-']+$/.test(r);
+      if (r !== query && isCleanRomaji) set.add(r);
     }
   } else {
     set.add(query);

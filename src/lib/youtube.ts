@@ -64,14 +64,15 @@ async function singleSearch(
   url.searchParams.set("part", "snippet");
   url.searchParams.set("q", searchQuery);
   url.searchParams.set("type", "video");
-  url.searchParams.set("videoCategoryId", "1");
+  // Removed videoCategoryId=1 (Film & Animation) — many anime clips are
+  // categorized as Entertainment or People & Blogs, causing 0 results.
   url.searchParams.set("maxResults", String(maxResults));
   url.searchParams.set("relevanceLanguage", "ja");
   url.searchParams.set("regionCode", "JP");
   url.searchParams.set("safeSearch", "moderate");
   url.searchParams.set("key", apiKey);
 
-  const res  = await fetch(url.toString(), { next: { revalidate: 180 } });
+  const res  = await fetch(url.toString(), { cache: 'no-store' });
   const data: YTResponse = await res.json();
 
   if (!res.ok || data.error) {
