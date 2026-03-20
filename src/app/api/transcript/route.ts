@@ -223,7 +223,7 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.relevanceScore - a.relevanceScore);
 
     const response: TranscriptSearchResponse = {
-      query,
+      query: q,
       searchVariants:  variants,
       videosChecked:   videos.length,
       videosMatched:   results.length,
