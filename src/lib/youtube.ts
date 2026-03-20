@@ -75,7 +75,11 @@ async function singleSearch(
   apiKey: string,
   maxResults: number
 ): Promise<YouTubeVideoMeta[]> {
-  const searchQuery = query.includes("アニメ") ? query : `${query} アニメ`;
+  // If query is already Japanese, don't append アニメ — it narrows results too much
+  // and causes YouTube to return generic anime pages instead of content matching
+  // the specific phrase. For romaji queries we still append it.
+  const hasJapanese = /[\u3040-\u9FFF]/.test(query);
+  const searchQuery = hasJapanese ? query : `${query} アニメ`;
 
   const url = new URL("https://www.googleapis.com/youtube/v3/search");
   url.searchParams.set("part", "snippet");

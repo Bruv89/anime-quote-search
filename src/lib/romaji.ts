@@ -221,19 +221,25 @@ export function buildSearchVariants(query: string): string[] {
  * Running these in parallel gives 3x more candidate videos.
  */
 export function buildYouTubeQueries(query: string): string[] {
-  const queries = new Set<string>();
-  queries.add(query); // original input
+  // IMPORTANT: Use Japanese variants first.
+  // YouTube understands Japanese much better than romaji.
+  // "くいだおれ アニメ" finds far more relevant videos than "kuidaore アニメ".
+  const queries: string[] = [];
 
   if (isRomaji(query)) {
+    // Romaji → hiragana and katakana as primary queries
     const hira = wanakana.toHiragana(query);
-    if (hira !== query) queries.add(hira);
+    const kata = wanakana.toKatakana(query);
+    if (hira !== query) queries.push(hira);  // e.g. "くいだおれ"
+    if (kata !== query && kata !== hira) queries.push(kata);  // e.g. "クイダオレ"
+    queries.push(query);                      // romaji as last fallback
   } else if (containsJapanese(query)) {
+    queries.push(query);                      // original Japanese first
     const romaji = wanakana.toRomaji(query, { convertLongVowelMark: true });
-    if (romaji !== query) queries.add(romaji);
+    if (romaji !== query) queries.push(romaji);
+  } else {
+    queries.push(query);
   }
 
-  // Always add a generic fallback to maximise video pool
-  queries.add("アニメ 名言");
-
-  return Array.from(queries).slice(0, 3); // max 3 (= 3 API calls × 100 quota units each)
+  return queries.slice(0, 3);
 }
