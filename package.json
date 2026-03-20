@@ -12,11 +12,13 @@
     "next": "^15.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "kuromoji": "^0.1.2",
     "wanakana": "^5.3.1",
     "youtube-transcript": "^1.2.1",
     "lucide-react": "^0.469.0"
   },
   "devDependencies": {
+    "@types/kuromoji": "^0.1.2",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
