@@ -179,11 +179,12 @@ export function buildSearchVariants(query: string): string[] {
   variants.add(q);
 
   if (isRomaji(q)) {
-    // Convert to kana
+    // Convert to kana — only add if result is pure kana (no leftover latin chars)
     const hira = wanakana.toHiragana(q);
     const kata = wanakana.toKatakana(q);
-    if (hira !== q) variants.add(hira);
-    if (kata !== q) variants.add(kata);
+    const pureKana = (s: string) => !/[a-zA-Z]/.test(s);
+    if (hira !== q && pureKana(hira)) variants.add(hira);
+    if (kata !== q && pureKana(kata)) variants.add(kata);
 
     // Long vowel variants: "ou"→"o", "uu"→"u"
     const simplified = q.replace(/ou/gi, "o").replace(/uu/gi, "u");
@@ -195,12 +196,7 @@ export function buildSearchVariants(query: string): string[] {
       if (kataSimp !== simplified) variants.add(kataSimp);
     }
 
-    // Also try without trailing vowel (e.g. "narut" → "naruto")
-    // This helps with partial romaji input
-    if (q.length >= 4) {
-      const withoutLast = q.slice(0, -1);
-      variants.add(wanakana.toHiragana(withoutLast));
-    }
+
   } else if (containsJapanese(q)) {
     // Japanese input: add romaji and alternate script
     const romaji = wanakana.toRomaji(q, { convertLongVowelMark: true });
@@ -235,28 +231,38 @@ export function buildYouTubeQueries(query: string): string[] {
 
   const set = new Set<string>();
 
+  const pureKana = (s: string) => !/[a-zA-Z]/.test(s);
+
   if (isRomaji(query)) {
-    // Romaji input: add hiragana and katakana — these are the most useful for YouTube
+    // Romaji → kana first (YouTube understands kana better than romaji for Japanese content)
     const hira = wanakana.toHiragana(query);
     const kata = wanakana.toKatakana(query);
-    if (hira !== query) set.add(hira);
-    if (kata !== query) set.add(kata);
+    if (hira !== query && pureKana(hira)) set.add(hira);
+    if (kata !== query && pureKana(kata)) set.add(kata);
     set.add(query); // romaji last
   } else if (containsJapanese(query)) {
-    set.add(query); // original (kanji/mixed) first — most specific
-    // Add hiragana version (wanakana converts kana, leaves kanji)
-    // Actually wanakana.toHiragana converts katakana→hiragana
+    set.add(query); // original first (kanji/mixed most specific for YouTube)
+
     if (wanakana.isKatakana(query)) {
+      // Katakana → also search hiragana and romaji
       set.add(wanakana.toHiragana(query));
+      const r = wanakana.toRomaji(query, { convertLongVowelMark: true });
+      if (r !== query) set.add(r);
     } else if (wanakana.isHiragana(query)) {
+      // Hiragana → also search katakana and romaji
+      // NOTE: YouTube's index sometimes contains kanji versions of the word.
+      // We can't convert hiragana→kanji, but romaji often maps to kanji in YT's index.
       set.add(wanakana.toKatakana(query));
+      const r = wanakana.toRomaji(query, { convertLongVowelMark: true });
+      if (r !== query) set.add(r);
+    } else {
+      // Mixed kanji/kana — add romaji
+      const r = wanakana.toRomaji(query, { convertLongVowelMark: true });
+      if (r !== query) set.add(r);
     }
-    // Add romaji
-    const romaji = wanakana.toRomaji(query, { convertLongVowelMark: true });
-    if (romaji !== query) set.add(romaji);
   } else {
     set.add(query);
   }
 
-  return Array.from(set).slice(0, 3);
+  return Array.from(set).slice(0, 4); // allow 4 queries for Japanese input
 }
