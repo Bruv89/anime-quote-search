@@ -23,7 +23,7 @@ import {
   type MatchResult,
 } from "@/lib/romaji";
 import { searchAnimeVideosMulti, type YouTubeVideoMeta } from "@/lib/youtube";
-import { toHiraganaReadingSync, warmupTokenizer } from "@/lib/kanji";
+import { toHiraganaReadingSync, warmupTokenizer, getTokenizer } from "@/lib/kanji";
 import * as wanakana from "wanakana";
 
 // Warm up kuromoji at module load time so it's ready before first request
@@ -254,8 +254,13 @@ export async function GET(req: NextRequest) {
   const ytQueries = buildYouTubeQueries(q);
 
   try {
-    // YouTube searches + kuromoji warmup run in parallel
-    const videos = await searchAnimeVideosMulti(ytQueries, apiKey, 15);
+    // Run YouTube searches AND kuromoji init in parallel —
+    // both are awaited before scanning starts, so toHiraganaReadingSync
+    // is guaranteed to have the tokenizer ready.
+    const [videos] = await Promise.all([
+      searchAnimeVideosMulti(ytQueries, apiKey, 15),
+      getTokenizer().catch(() => null), // don't fail if kuromoji errors
+    ]);
 
     const tasks = videos.map((video) => async (): Promise<TranscriptResult | null> => {
       const segments = await fetchTranscript(video.videoId, 7000);
