@@ -33,6 +33,7 @@ export interface TranscriptResult extends YouTubeVideoMeta {
   matches: TranscriptMatch[];
   matchCount: number;
   bestScore: number;
+  tier: "dialogue" | "extended";
 }
 
 export interface TranscriptSearchResponse {
@@ -41,6 +42,8 @@ export interface TranscriptSearchResponse {
   videosChecked: number;
   videosMatched: number;
   results: TranscriptResult[];
+  /** True if ALL matched results are "extended" (songs/AMV) — no pure dialogue found */
+  onlyExtended: boolean;
   error?: string;
 }
 
@@ -219,7 +222,7 @@ export async function GET(req: NextRequest) {
 
   try {
     // Phase 1: fetch videos
-    const videos = await searchAnimeVideosMulti(ytQueries, apiKey, 15);
+    const videos = await searchAnimeVideosMulti(ytQueries, apiKey, 25);
 
     // Phase 2: fetch all transcripts in parallel
     const fetched = await pool(
@@ -256,7 +259,12 @@ export async function GET(req: NextRequest) {
       results.push({ ...video, matches, matchCount: matches.length, bestScore });
     }
 
-    results.sort((a, b) => b.bestScore - a.bestScore || b.matchCount - a.matchCount);
+    results.sort((a, b) => {
+      // Dialogue tier always before extended tier
+      if (a.tier !== b.tier) return a.tier === "dialogue" ? -1 : 1;
+      // Within same tier: best score first, then most matches
+      return b.bestScore - a.bestScore || b.matchCount - a.matchCount;
+    });
 
     return NextResponse.json(
       { query: q, searchVariants: variants, videosChecked: videos.length, videosMatched: results.length, results } satisfies TranscriptSearchResponse,

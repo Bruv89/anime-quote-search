@@ -244,20 +244,50 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Results */}
-          {hasResults && (
-            <div className="space-y-4">
-              {data.results.map((result, i) => (
-                <TranscriptCard
-                  key={result.videoId}
-                  result={result}
-                  index={i}
-                  query={query}
-                  searchVariants={data.searchVariants}
-                />
-              ))}
-            </div>
-          )}
+          {/* Results — two-tier layout */}
+          {hasResults && (() => {
+            const dialogueResults = data.results.filter((r) => r.tier === "dialogue");
+            const extendedResults = data.results.filter((r) => r.tier === "extended");
+            return (
+              <>
+                {dialogueResults.length > 0 && (
+                  <div className="space-y-4">
+                    {dialogueResults.map((result, i) => (
+                      <TranscriptCard key={result.videoId} result={result} index={i}
+                        query={query} searchVariants={data.searchVariants} />
+                    ))}
+                  </div>
+                )}
+                {extendedResults.length > 0 && (
+                  <div className="mt-8">
+                    <div className="flex items-center gap-3 mb-5">
+                      <div className="flex-1 h-px bg-white/5" />
+                      <div className="text-center px-3">
+                        {dialogueResults.length === 0 ? (
+                          <p className="text-xs text-amber-400/60 font-mono leading-relaxed">
+                            Nessun match in clip anime con dialoghi.<br />
+                            Contenuto correlato ma non animato (canzoni, AMV, compilation)
+                          </p>
+                        ) : (
+                          <p className="text-xs text-slate-600 font-mono">
+                            Contenuto correlato (canzoni · AMV · compilation)
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex-1 h-px bg-white/5" />
+                    </div>
+                    <div className="space-y-4 opacity-75">
+                      {extendedResults.map((result, i) => (
+                        <TranscriptCard key={result.videoId} result={result}
+                          index={dialogueResults.length + i}
+                          query={query} searchVariants={data.searchVariants} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </section>
       )}
 

@@ -1,13 +1,11 @@
 /**
  * src/lib/youtube.ts
  *
- * YouTube Data API v3 — anime-only search.
+ * YouTube search with two-tier classification:
+ *   Tier 1 "dialogue" — actual anime episodes/clips where characters speak
+ *   Tier 2 "extended" — songs, AMVs, compilations (still anime-related but not dialogue)
  *
- * Since we always append "アニメ" to every query, YouTube's own algorithm
- * already biases results toward anime content. Our post-filter only needs
- * to remove obvious false positives (sports events, cooking vlogs, etc.)
- * — we should NOT require explicit anime keywords in the title, because
- * many valid anime clips have plain titles like "くいだおれ太郎が劇場支配人".
+ * We always fetch both tiers. The API route decides what to show.
  */
 
 export interface YouTubeVideoMeta {
@@ -16,6 +14,7 @@ export interface YouTubeVideoMeta {
   channelTitle: string;
   thumbnailUrl: string;
   watchUrl: string;
+  tier: "dialogue" | "extended";
 }
 
 interface YTItem {
@@ -37,19 +36,55 @@ function decodeHTML(t: string): string {
     .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 }
 
-// Only hard-exclude content that is CLEARLY not anime
-// (sports events, cooking, travel vlogs, etc.)
-const HARD_EXCLUDE = [
-  "cooking", "recipe", "football", "soccer",
-  "makeup", "minecraft", "fortnite", "roblox",
-  "マラソン", "市民マラソン", "応援", "グルメ食べ歩き",
-  "大阪観光", "旅行vlog",
+// Keywords that indicate MUSIC / AMV / compilation — not direct dialogue
+const MUSIC_KEYWORDS = [
+  // Japanese
+  "アニソン", "主題歌", "op ", " ed ", "オープニング", "エンディング",
+  "bgm", "ost", "サウンドトラック", "歌ってみた", "弾いてみた",
+  "amv", "mad", "名言集", "名言まとめ", "セリフ集", "泣ける",
+  "感動mad", "感動amv", "mixed edit", "edit",
+  // English
+  "opening", "ending", "soundtrack", "music video", "full song",
+  "lyric", "lyrics", "covered by", "cover",
 ];
 
-function looksLikeAnime(item: YTItem): boolean {
-  const combined = (item.snippet.title + " " + item.snippet.channelTitle).toLowerCase();
-  // Only remove obvious non-anime — trust YouTube's アニメ query for the rest
-  return !HARD_EXCLUDE.some((kw) => combined.includes(kw.toLowerCase()));
+// Keywords that strongly indicate actual episode content / dialogue
+const DIALOGUE_KEYWORDS = [
+  "第", "話", "episode", "ep.", "エピソード", "本編",
+  "クリップ", "clip", "シーン", "scene",
+  "公式", "official", "フル", "full",
+];
+
+// Hard exclude — clearly not anime at all
+const HARD_EXCLUDE = [
+  "マラソン", "市民マラソン", "観光", "グルメ",
+  "cooking", "recipe", "minecraft", "fortnite",
+  "makeup", "fashion",
+];
+
+function classify(item: YTItem): "dialogue" | "extended" | "exclude" {
+  const title   = item.snippet.title.toLowerCase();
+  const channel = item.snippet.channelTitle.toLowerCase();
+  const combined = title + " " + channel;
+
+  // Hard exclude first
+  if (HARD_EXCLUDE.some((kw) => combined.includes(kw.toLowerCase()))) {
+    return "exclude";
+  }
+
+  // Check for music/compilation signals
+  const isMusic = MUSIC_KEYWORDS.some((kw) => combined.includes(kw.toLowerCase()));
+
+  // Check for dialogue/episode signals
+  const isDialogue = DIALOGUE_KEYWORDS.some((kw) => combined.includes(kw.toLowerCase()));
+
+  if (isDialogue && !isMusic) return "dialogue";
+  if (isMusic) return "extended";
+
+  // Default: if it has Japanese characters and passed hard exclude → extended
+  // We're lenient here because dialogue clips often have generic titles
+  const hasJapanese = /[\u3040-\u9FFF]/.test(item.snippet.title);
+  return hasJapanese ? "dialogue" : "extended";
 }
 
 async function singleSearch(
@@ -57,22 +92,19 @@ async function singleSearch(
   apiKey: string,
   maxResults: number
 ): Promise<YouTubeVideoMeta[]> {
-  // Always append アニメ — YouTube understands this and biases toward anime
   const searchQuery = `${query} アニメ`;
 
   const url = new URL("https://www.googleapis.com/youtube/v3/search");
   url.searchParams.set("part", "snippet");
   url.searchParams.set("q", searchQuery);
   url.searchParams.set("type", "video");
-  // Removed videoCategoryId=1 (Film & Animation) — many anime clips are
-  // categorized as Entertainment or People & Blogs, causing 0 results.
   url.searchParams.set("maxResults", String(maxResults));
   url.searchParams.set("relevanceLanguage", "ja");
   url.searchParams.set("regionCode", "JP");
   url.searchParams.set("safeSearch", "moderate");
   url.searchParams.set("key", apiKey);
 
-  const res  = await fetch(url.toString(), { cache: 'no-store' });
+  const res  = await fetch(url.toString(), { cache: "no-store" });
   const data: YTResponse = await res.json();
 
   if (!res.ok || data.error) {
@@ -80,22 +112,27 @@ async function singleSearch(
   }
 
   return (data.items ?? [])
-    .filter((item) => item.id?.videoId && looksLikeAnime(item))
-    .map((item) => ({
-      videoId:      item.id.videoId,
-      title:        decodeHTML(item.snippet.title),
-      channelTitle: item.snippet.channelTitle,
-      thumbnailUrl:
-        item.snippet.thumbnails.medium?.url ??
-        `https://img.youtube.com/vi/${item.id.videoId}/mqdefault.jpg`,
-      watchUrl: `https://www.youtube.com/watch?v=${item.id.videoId}`,
-    }));
+    .map((item) => {
+      const tier = classify(item);
+      if (tier === "exclude" || !item.id?.videoId) return null;
+      return {
+        videoId:      item.id.videoId,
+        title:        decodeHTML(item.snippet.title),
+        channelTitle: item.snippet.channelTitle,
+        thumbnailUrl:
+          item.snippet.thumbnails.medium?.url ??
+          `https://img.youtube.com/vi/${item.id.videoId}/mqdefault.jpg`,
+        watchUrl: `https://www.youtube.com/watch?v=${item.id.videoId}`,
+        tier,
+      } satisfies YouTubeVideoMeta;
+    })
+    .filter((v): v is YouTubeVideoMeta => v !== null);
 }
 
 export async function searchAnimeVideosMulti(
   queries: string[],
   apiKey: string,
-  maxPerQuery = 20
+  maxPerQuery = 25
 ): Promise<YouTubeVideoMeta[]> {
   const settled = await Promise.allSettled(
     queries.map((q) => singleSearch(q, apiKey, maxPerQuery))
@@ -114,5 +151,9 @@ export async function searchAnimeVideosMulti(
     }
   }
 
-  return results;
+  // Dialogue videos first, then extended
+  return results.sort((a, b) => {
+    if (a.tier === b.tier) return 0;
+    return a.tier === "dialogue" ? -1 : 1;
+  });
 }
